@@ -1,0 +1,25 @@
+import { call, pool, pct, tally, sql, rssMB, log, ok, save } from './lib.mjs';
+const N = Number(process.argv[2] || 10000);
+const abc = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+const rnd = (n) => Array.from({ length: n }, () => abc[Math.floor(Math.random() * abc.length)]).join('');
+const users = Array.from({ length: N }, (_, i) => ({ email: `user${i}@loadtest.test`, fullName: `User ${i}`, password: `Aa1${rnd(12)}${i}` }));
+log(`== P1: daftar ${N} akun berbeda (sandi berbeda) lewat API ==`);
+const rss0 = rssMB(); const t0 = Date.now(); let done = 0;
+const rs = await pool(users, 40, async (u) => {
+  const r = await call('POST', '/auth/register', { body: u });
+  if (++done % 1000 === 0) console.log(`progress ${done}/${N} ${Math.round((Date.now() - t0) / 1000)}s`);
+  return r;
+});
+const secs = (Date.now() - t0) / 1000;
+save('users', users.map((u, i) => ({ ...u, status: rs[i].status })));
+const lat = rs.map((r) => r.ms);
+log('hasil status:', JSON.stringify(tally(rs)), `durasi ${secs.toFixed(0)}s`, `throughput ${(N / secs).toFixed(1)} req/s`);
+log(`latensi daftar p50=${pct(lat, .5)}ms p95=${pct(lat, .95)}ms p99=${pct(lat, .99)}ms max=${pct(lat, 1)}ms | RSS server ${rss0}MB -> ${rssMB()}MB`);
+ok('semua pendaftaran berhasil (201)', rs.every((r) => r.status === 201), JSON.stringify(tally(rs)));
+const total = Number(sql('select count(*) from User where email like "%@loadtest.test"'));
+const distinct = Number(sql('select count(distinct password) from User where email like "%@loadtest.test"'));
+const argon = Number(sql('select count(*) from User where email like "%@loadtest.test" and password like "$argon2id$%"'));
+ok(`DB berisi ${N} akun`, total === N, `ditemukan ${total}`);
+ok('setiap akun punya hash berbeda (salt)', distinct === N, `hash unik ${distinct}`);
+ok('semua hash berformat Argon2id', argon === N, `${argon}`);
+ok('tidak ada sandi tersimpan polos', Number(sql(`select count(*) from User where password in (select 'x')`)) === 0);

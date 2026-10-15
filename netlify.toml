@@ -1,0 +1,8 @@
+# Hosting demo gratis di Netlify: build versi demo (server tiruan di browser) dari folder frontend.
+[build]
+  base = "frontend"
+  command = "npm ci && npm run build:demo"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"

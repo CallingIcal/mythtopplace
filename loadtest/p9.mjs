@@ -1,0 +1,24 @@
+import { call, sql, log, ok, load } from './lib.mjs';
+log('== P9: pembatalan otomatis 10 menit ==');
+sql('update TopupStock set stock=1000, isActive=1 where id=1');
+const users = load('users');
+const jar = {}; sql(`update User set sessionId=NULL,lastSeenAt=NULL where email='${users[7000].email}'`);
+await call('POST', '/auth/login', { body: { email: users[7000].email, password: users[7000].password }, jar });
+const before = Number(sql('select stock from TopupStock where id=1'));
+const t1 = await call('POST', '/transactions', { jar, body: { topupStockId: 1, paymentId: 1, gameUserId: '55556666' } });
+const t2 = await call('POST', '/transactions', { jar, body: { topupStockId: 1, paymentId: 1, gameUserId: '77778888' } });
+ok('pesanan PENDING membawa batas waktu bayar (expiresAt = +10 menit)', t1.data?.expiresAt && Math.abs(new Date(t1.data.expiresAt) - new Date(t1.data.createdAt) - 600000) < 2000, t1.data?.expiresAt);
+sql(`update Transaction set createdAt = NOW(3) - INTERVAL 9 MINUTE where id=${t1.data.id}`);
+sql(`update Transaction set createdAt = NOW(3) - INTERVAL 11 MINUTE where id=${t2.data.id}`);
+log('menunggu pembatalan otomatis (maks ~20 detik)...');
+for (let i = 0; i < 12; i++) { await new Promise((r) => setTimeout(r, 2500)); if (sql(`select status from Transaction where id=${t2.data.id}`) === 'CANCELLED') break; }
+ok('pesanan 11 menit tanpa bayar otomatis CANCELLED', sql(`select status from Transaction where id=${t2.data.id}`) === 'CANCELLED');
+ok('pesanan 9 menit masih PENDING (belum kedaluwarsa)', sql(`select status from Transaction where id=${t1.data.id}`) === 'PENDING');
+ok('stok dikembalikan oleh pembatalan otomatis (hanya 1 pesanan tersisa)', Number(sql('select stock from TopupStock where id=1')) === before - 1, `stok ${before} -> ${sql('select stock from TopupStock where id=1')}`);
+const pay = await call('POST', `/transactions/${t1.data.id}/confirm-payment`, { jar, body: { paymentRef: 'OK-1' } });
+ok('yang sudah bayar (PROCESSING) tidak ikut dibatalkan otomatis', pay.status < 300);
+sql(`update Transaction set createdAt = NOW(3) - INTERVAL 30 MINUTE where id=${t1.data.id}`);
+await new Promise((r) => setTimeout(r, 17000));
+ok('PROCESSING lama tetap PROCESSING (menunggu admin)', sql(`select status from Transaction where id=${t1.data.id}`) === 'PROCESSING');
+const dead = await call('POST', `/transactions/${t2.data.id}/confirm-payment`, { jar, body: { paymentRef: 'TELAT' } });
+ok('bayar pesanan yang sudah dibatalkan otomatis ditolak 400', dead.status === 400);

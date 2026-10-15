@@ -1,0 +1,14 @@
+import { call, sql, log, ok, load } from './lib.mjs';
+log('== P11: polling terautentikasi tidak terkena batas per-IP; batas publik tetap ==');
+const users = load('users'); const i = 8100;
+sql(`update User set sessionId=NULL,lastSeenAt=NULL where email='${users[i].email}'`);
+const jar = {}; await call('POST', '/auth/login', { body: { email: users[i].email, password: users[i].password }, jar });
+const ip = '10.66.66.66';
+const rs = []; for (let k = 0; k < 150; k++) rs.push((await call('GET', k % 3 === 0 ? '/chat/summary' : k % 3 === 1 ? '/chat' : '/transactions/mine', { jar, ip })).status);
+ok('150 permintaan polling dari satu IP semuanya 200 (CGNAT aman)', rs.every((s) => s === 200), JSON.stringify(rs.reduce((m, s) => ((m[s] = (m[s] || 0) + 1), m), {})));
+const pub = []; for (let k = 0; k < 70; k++) pub.push((await call('GET', '/games', { ip: '10.66.66.67' })).status);
+ok('endpoint publik tetap dibatasi 60/menit per IP (61 dst. 429)', pub.slice(0, 60).every((s) => s === 200) && pub.slice(60).every((s) => s === 429));
+const noAuth = []; for (let k = 0; k < 100; k++) noAuth.push((await call('GET', '/chat/summary', { ip: '10.66.66.68' })).status);
+ok('tanpa login tetap 401 cepat (tidak membebani DB)', noAuth.every((s) => s === 401));
+const w = []; for (let k = 0; k < 12; k++) w.push((await call('POST', '/chat', { jar, ip: '10.66.66.69', body: { body: 'x' + k } })).status);
+ok('kirim chat tetap dibatasi 10/menit per IP', w.slice(0, 10).every((s) => s === 201) && w.slice(10).every((s) => s === 429), w.join(','));

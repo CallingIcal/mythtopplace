@@ -1,0 +1,165 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum TransactionStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model Role {
+  id    Int    @id @default(autoincrement()) @db.TinyInt
+  name  String @unique @db.VarChar(50)
+  users User[]
+}
+
+model User {
+  failedLogins Int       @default(0)
+  lockedUntil  DateTime?
+  sessionId    String?   @db.VarChar(64)
+  lastSeenAt   DateTime?
+  phone        String?   @db.VarChar(20)
+  instagram    String?   @db.VarChar(40)
+  address      String?   @db.VarChar(300)
+  nameChangedAt DateTime?
+  id           BigInt        @id @default(autoincrement()) @db.UnsignedBigInt
+  email        String        @unique @db.VarChar(190)
+  fullName     String        @db.VarChar(100)
+  password     String        @db.VarChar(255)
+  roleId       Int           @default(1) @db.TinyInt
+  isActive     Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  role         Role          @relation(fields: [roleId], references: [id])
+  transactions Transaction[]
+  verified     Transaction[] @relation("VerifiedBy")
+  auditLogs    AuditLog[]
+  avatar       UserAvatar?
+  chatThread   ChatThread?
+}
+
+model Game {
+  id          BigInt       @id @default(autoincrement()) @db.UnsignedBigInt
+  name        String       @db.VarChar(100)
+  slug        String       @unique @db.VarChar(120)
+  description String?      @db.Text
+  imageUrl    String?      @db.VarChar(255)
+  isActive    Boolean      @default(true)
+  stocks      TopupStock[]
+}
+
+model TopupStock {
+  id           BigInt        @id @default(autoincrement()) @db.UnsignedBigInt
+  gameId       BigInt        @db.UnsignedBigInt
+  nominal      String        @db.VarChar(50)
+  quantity     String        @db.VarChar(50)
+  stock        Int           @default(0)
+  price        Decimal       @db.Decimal(10,2)
+  isActive     Boolean       @default(true)
+  discountPercent Int        @default(0)
+  game         Game          @relation(fields: [gameId], references: [id])
+  transactions Transaction[]
+
+  @@index([gameId, isActive])
+}
+
+model Payment {
+  id           Int           @id @default(autoincrement()) @db.TinyInt
+  name         String        @unique @db.VarChar(50)
+  isActive     Boolean       @default(true)
+  transactions Transaction[]
+}
+
+model Transaction {
+  id           BigInt            @id @default(autoincrement()) @db.UnsignedBigInt
+  invoiceNo    String            @unique @db.VarChar(30)
+  userId       BigInt            @db.UnsignedBigInt
+  topupStockId BigInt            @db.UnsignedBigInt
+  gameUserId   String            @db.VarChar(100)
+  paymentId    Int               @db.TinyInt
+  amount       Decimal           @db.Decimal(10,2)
+  adminFee     Decimal           @default(0) @db.Decimal(10,2)
+  status       TransactionStatus @default(PENDING)
+  paymentRef   String?           @db.VarChar(255)
+  verifiedBy   BigInt?           @db.UnsignedBigInt
+  verifiedAt   DateTime?
+  paidAt       DateTime?
+  closedAt     DateTime?
+  listPrice    Decimal?          @db.Decimal(10,2)
+  discountPercent Int            @default(0)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  user         User              @relation(fields: [userId], references: [id])
+  topupStock   TopupStock        @relation(fields: [topupStockId], references: [id])
+  payment      Payment           @relation(fields: [paymentId], references: [id])
+  verifier     User?             @relation("VerifiedBy", fields: [verifiedBy], references: [id])
+  proof        TransactionProof?
+  chatMessages ChatMessage[]
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
+
+model AuditLog {
+  id          BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  adminId     BigInt   @db.UnsignedBigInt
+  action      String   @db.VarChar(100)
+  entityType  String   @db.VarChar(50)
+  entityId    BigInt   @db.UnsignedBigInt
+  statusBefore String? @db.VarChar(30)
+  statusAfter  String? @db.VarChar(30)
+  createdAt   DateTime @default(now())
+  admin       User     @relation(fields: [adminId], references: [id])
+  @@index([adminId, createdAt])
+  @@index([entityType, entityId])
+}
+
+model TransactionProof {
+  transactionId BigInt      @id @db.UnsignedBigInt
+  image         String      @db.MediumText
+  createdAt     DateTime    @default(now())
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+}
+
+model UserAvatar {
+  userId    BigInt   @id @db.UnsignedBigInt
+  image     String   @db.MediumText
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ChatThread {
+  userId        BigInt        @id @db.UnsignedBigInt
+  lastMessageAt DateTime      @default(now())
+  lastPreview   String        @default("") @db.VarChar(120)
+  userUnread    Int           @default(0)
+  adminUnread   Int           @default(0)
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages      ChatMessage[]
+
+  @@index([lastMessageAt])
+}
+
+model ChatMessage {
+  id            BigInt       @id @default(autoincrement()) @db.UnsignedBigInt
+  userId        BigInt       @db.UnsignedBigInt
+  fromAdmin     Boolean      @default(false)
+  body          String       @db.VarChar(1000)
+  image         String?      @db.MediumText
+  hasImage      Boolean      @default(false)
+  transactionId BigInt?      @db.UnsignedBigInt
+  createdAt     DateTime     @default(now())
+  thread        ChatThread   @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+
+  @@index([userId, id])
+}
